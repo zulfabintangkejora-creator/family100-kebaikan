@@ -103,15 +103,23 @@ function hostInit(){
  }).then(()=>{ enterApp(); renderHost(); });
 }
 function studentInit(){
- if(!myTeam){document.getElementById('loginMsg').textContent='Isi nama kelompok.';return}
+ if(!myTeam){document.getElementById('loginMsg').textContent='Pilih kelompok.';return}
  const id=teamKey(myTeam);
  myTeamId=id;
  const teamRef=roomRef.child('teams/'+id);
- teamRef.transaction(v=>{
-   if(v) return v;
-   return {name:myTeam,player:myName,score:0,lives:4,joinedAt:firebase.database.ServerValue.TIMESTAMP};
+ // Simpan kelompok secara langsung agar setiap kelompok pasti tercatat di Firebase.
+ teamRef.once('value').then(s=>{
+   if(!s.exists()){
+     return teamRef.set({name:myTeam,player:myName,score:0,lives:4,joinedAt:firebase.database.ServerValue.TIMESTAMP});
+   }
+   // Jika kelompok sudah ada, jangan reset nilai/nyawa. Cukup perbarui nama pemain.
+   return teamRef.update({name:myTeam,player:myName});
+ }).then(()=>{
+   enterApp();
+   roomRef.on('value',s=>{state=s.val()||{};renderStudent()});
+ }).catch(e=>{
+   document.getElementById('loginMsg').textContent='Gagal masuk kelompok: '+e.message;
  });
- enterApp(); roomRef.on('value',s=>{state=s.val()||{};renderStudent()});
 }
 function enterApp(){document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden')}
 function renderHost(){
