@@ -77,7 +77,12 @@ function startMusic(){
 function stopMusic(){if(musicTimer){clearInterval(musicTimer);musicTimer=null}}
 
 function norm(s){return s.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\\s+/g,' ').trim()}
-function teamKey(name){return 'team_'+Array.from(norm(name)).map(c=>c.charCodeAt(0).toString(16).padStart(2,'0')).join('')}
+function teamKey(name){
+ const n=norm(name);
+ const m=n.match(/^kelompok\s*([1-9])$/);
+ if(m) return 'kelompok_'+m[1];
+ return 'team_'+Array.from(n).map(c=>c.charCodeAt(0).toString(16).padStart(2,'0')).join('');
+}
 function shuffle(a){a=[...a];for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 function esc(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
 function join(){
@@ -91,15 +96,21 @@ function join(){
 }
 function hostInit(){
  document.getElementById('classBox').classList.add('hidden');
- roomRef.set({status:'waiting',qIndex:0,startedAt:0,remaining:600,teams:{},found:{},revealed:{},lastMessage:'Menunggu kelompok masuk...'});
- enterApp(); renderHost();
+ roomRef.once('value').then(s=>{
+   if(!s.exists()){
+     return roomRef.set({status:'waiting',qIndex:0,startedAt:0,remaining:600,teams:{},found:{},revealed:{},submissions:{},lastMessage:'Menunggu kelompok masuk...'});
+   }
+ }).then(()=>{ enterApp(); renderHost(); });
 }
 function studentInit(){
  if(!myTeam){document.getElementById('loginMsg').textContent='Isi nama kelompok.';return}
  const id=teamKey(myTeam);
  myTeamId=id;
  const teamRef=roomRef.child('teams/'+id);
- teamRef.transaction(v=>v||{name:myTeam,player:myName,score:0,lives:4,joinedAt:firebase.database.ServerValue.TIMESTAMP});
+ teamRef.transaction(v=>{
+   if(v) return v;
+   return {name:myTeam,player:myName,score:0,lives:4,joinedAt:firebase.database.ServerValue.TIMESTAMP};
+ });
  enterApp(); roomRef.on('value',s=>{state=s.val()||{};renderStudent()});
 }
 function enterApp(){document.getElementById('login').classList.add('hidden');document.getElementById('app').classList.remove('hidden')}
@@ -192,15 +203,17 @@ function renderStudent(){
    const top=document.getElementById('top');
    top.innerHTML=`<div class="big">${esc(myTeam)}</div><div>Room: ${roomCode} • Nilai: <b>${me.score||0}</b> • ❤️ ${me.lives??4}</div>`;
    const t=document.querySelector('#game .muted'); if(t) t.textContent='Waktu '+fmt(state.remaining??600);
+   const lifeP=document.querySelector('#game .lifeLine'); if(lifeP) lifeP.innerHTML='Nyawa: '+ '❤️'.repeat(Number(me.lives??4)) + (Number(me.lives??4)===0?' — <b>Nyawa habis</b>':'');
    const msg=document.querySelector('#game p b'); if(msg) msg.textContent=state.lastMessage||'';
-   const inp=document.getElementById('answer'); if(inp && document.activeElement===inp) return;
+   const inp=document.getElementById('answer');
+   if(inp){ inp.disabled=state.status!=='playing'||(Number(me.lives??0)<=0); }
    return;
  }
  document.getElementById('top').innerHTML=`<div class="big">${esc(myTeam)}</div><div>Room: ${roomCode} • Nilai: <b>${me.score||0}</b> • ❤️ ${me.lives??4}</div>`;
  if(state.status==='waiting'){document.getElementById('game').innerHTML='<h2>⏳ Menunggu Guru Memulai...</h2><p>Anda sudah masuk. Tunggu semua kelompok siap.</p>';return}
  if(state.status==='finished'){document.getElementById('game').innerHTML='<h2>🏁 Permainan Selesai</h2><p>Permainan telah diakhiri. Nilai terakhir: <b>'+me.score+'</b></p><p class="muted">Tunggu arahan Guru untuk sesi berikutnya.</p>';return}
  if(state.status==='revealing'){document.getElementById('game').innerHTML=`<h2>🔔 Babak Selesai</h2><p>Guru sedang membuka jawaban.</p><div class="answers">${answers().map((x,i)=>{let f=(state.found||{})[i],r=(state.revealed||{})[i];return `<div class="answer ${f?'found':''}"><b>${(f||r)?'✓ '+esc(x[0]):'🔒 Tertutup'}</b><small>${(f||r)?x[1]+' poin':'Belum dibuka'}</small></div>`}).join('')}</div>`;return}
- document.getElementById('game').innerHTML=`<h2>${esc(q.q)}</h2><div class="muted">${state.status==='paused'?'⏸️ Game dijeda':'Waktu '+fmt(state.remaining??600)}</div><p>Nyawa: ${'❤️'.repeat(me.lives??4)}${(me.lives??4)===0?' — <b>Nyawa habis</b>':''}</p><br><input id="answer" placeholder="Ketik jawaban..." onkeydown="if(event.key==='Enter')submit(this.value)" ${state.status!=='playing'||(me.lives??0)<=0?'disabled':''}><button onclick="submit(document.getElementById('answer').value)" ${state.status!=='playing'||(me.lives??0)<=0?'disabled':''}>Kirim</button><p><b>${esc(state.lastMessage||'')}</b></p><div class="answers">${answers().map((x,i)=>{let f=(state.found||{})[i];return `<div class="answer ${f?'found':''}"><b>${f?'✓ '+esc(x[0]):'🔒 Tertutup'}</b>${f?'<small>'+x[1]+' poin</small>':''}</div>`}).join('')}</div>`;
+ document.getElementById('game').innerHTML=`<h2>${esc(q.q)}</h2><div class="muted">${state.status==='paused'?'⏸️ Game dijeda':'Waktu '+fmt(state.remaining??600)}</div><p class="lifeLine">Nyawa: ${'❤️'.repeat(me.lives??4)}${(me.lives??4)===0?' — <b>Nyawa habis</b>':''}</p><br><input id="answer" placeholder="Ketik jawaban..." onkeydown="if(event.key==='Enter')submit(this.value)" ${state.status!=='playing'||(me.lives??0)<=0?'disabled':''}><button onclick="submit(document.getElementById('answer').value)" ${state.status!=='playing'||(me.lives??0)<=0?'disabled':''}>Kirim</button><p><b>${esc(state.lastMessage||'')}</b></p><div class="answers">${answers().map((x,i)=>{let f=(state.found||{})[i];return `<div class="answer ${f?'found':''}"><b>${f?'✓ '+esc(x[0]):'🔒 Tertutup'}</b>${f?'<small>'+x[1]+' poin</small>':''}</div>`}).join('')}</div>`;
  document.getElementById('teams').innerHTML='<h2>🏆 Klasemen</h2>'+teams.sort((a,b)=>b.score-a.score).map((t,i)=>`<div class="team"><span>${i+1}. ${esc(t.name)}</span><span>${t.score||0}</span></div>`).join('');
 }
 function manual(id,match){if(match>=0 && !(state.found||{})[match]){let s=(state.submissions||{})[id];roomRef.child('found/'+match).set({teamId:'manual',teamName:s.teamName,text:s.text,at:firebase.database.ServerValue.TIMESTAMP});roomRef.child('teams').once('value').then(sn=>sn.forEach(ch=>{if(ch.val().name===s.teamName)ch.ref.child('score').transaction(v=>(v||0)+answers()[match][1])}))}}
